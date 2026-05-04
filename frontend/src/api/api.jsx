@@ -1,6 +1,23 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+// Force HTTP protocol - get the current origin
+const getBaseURL = () => {
+  // In production, use the same origin but ensure it's HTTP
+  if (import.meta.env.PROD) {
+    const origin = window.location.origin;
+    // Ensure we're using HTTP
+    const httpOrigin = origin.replace('https://', 'http://');
+    return `${httpOrigin}/api`;
+  }
+  // In development, use the proxy
+  return '/api';
+};
+
+const API_BASE_URL = getBaseURL();
+
+console.log('📍 API Base URL:', API_BASE_URL);
+console.log('📍 Current Origin:', window.location.origin);
+console.log('📍 Environment:', import.meta.env.MODE);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -13,10 +30,15 @@ const api = axios.create({
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    // You can add auth tokens here if needed
+    // Force HTTP if we're on HTTP
+    if (config.url?.startsWith('http://') || config.baseURL?.startsWith('http://')) {
+      console.log('✅ Using HTTP connection');
+    }
+    console.log(`📤 ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
     return config;
   },
   (error) => {
+    console.error('❌ Request Error:', error);
     return Promise.reject(error);
   }
 );
@@ -24,18 +46,23 @@ api.interceptors.request.use(
 // Response interceptor
 api.interceptors.response.use(
   (response) => {
+    console.log(`📥 Response from ${response.config.url}:`, response.data);
     return response.data;
   },
   (error) => {
     const message = error.response?.data?.message || 'An unexpected error occurred';
-    console.error('API Error:', message);
+    console.error('❌ API Error:', message);
+    console.error('Error Details:', error.response?.data);
     return Promise.reject(error);
   }
 );
 
 // Lead API calls
 export const leadAPI = {
-  createLead: (leadData) => api.post('/leads', leadData),
+  createLead: (leadData) => {
+    console.log('📝 Creating Lead:', leadData);
+    return api.post('/leads', leadData);
+  },
   
   getLeads: (params = {}) => {
     const queryParams = new URLSearchParams();
@@ -49,6 +76,7 @@ export const leadAPI = {
     if (params.sortBy) queryParams.append('sortBy', params.sortBy);
     if (params.sortOrder) queryParams.append('sortOrder', params.sortOrder);
     
+    console.log('🔍 Fetching leads with params:', Object.fromEntries(queryParams));
     return api.get(`/leads?${queryParams.toString()}`);
   },
 };

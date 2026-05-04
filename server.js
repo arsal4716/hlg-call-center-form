@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 const dotenv = require("dotenv");
@@ -16,30 +15,14 @@ connectDB();
 
 const app = express();
 
-/* ================= SECURITY - RELAXED FOR HTTP ================= */
-app.use(
-  helmet({
-    crossOriginEmbedderPolicy: false,
-    crossOriginOpenerPolicy: false,
-    crossOriginResourcePolicy: false,
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'", "http:", "https:", "data:", "blob:"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "http:", "https:"],
-        styleSrc: ["'self'", "'unsafe-inline'", "http:", "https:"],
-        imgSrc: ["'self'", "data:", "http:", "https:", "blob:"],
-        fontSrc: ["'self'", "data:", "http:", "https:"],
-        connectSrc: ["'self'", "http:", "https:", "ws:", "wss:"],
-      },
-    },
-  })
-);
+// Disable trust proxy to prevent HTTPS redirect
+app.set('trust proxy', false);
 
-/* ================= CORS ================= */
+/* ================= CORS - MOST PERMISSIVE ================= */
 app.use(
   cors({
-    origin: "*", // Allow all origins for production HTTP
-    credentials: true,
+    origin: "*",
+    credentials: false,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -60,16 +43,11 @@ app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true }));
 
 /* ================= LOGGING ================= */
-if (process.env.NODE_ENV === "development") {
-  app.use(morgan("dev"));
-} else {
-  // Simple production logging
-  app.use((req, res, next) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${req.method} ${req.url}`);
-    next();
-  });
-}
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.url} - Protocol: ${req.protocol}`);
+  next();
+});
 
 /* ================= API ROUTES ================= */
 app.use("/api/leads", leadRoutes);
@@ -78,51 +56,55 @@ app.use("/api/leads", leadRoutes);
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    message: "Server is running",
+    message: "Server is running on HTTP",
     time: new Date().toISOString(),
     environment: process.env.NODE_ENV,
     port: PORT,
+    protocol: req.protocol,
+    host: req.get('host'),
   });
 });
 
 /* ================= FRONTEND SERVING ================= */
-// Find frontend build directory
 const frontendPath = path.resolve(__dirname, "./frontend/dist");
 
-console.log("📁 Looking for frontend build at:", frontendPath);
+console.log("📁 Frontend path:", frontendPath);
 
 if (fs.existsSync(frontendPath)) {
   console.log("✅ Frontend build found!");
-  
-  // Serve static files with proper MIME types
+
+  // Serve static files with headers that prevent HTTPS upgrade
   app.use(express.static(frontendPath, {
     setHeaders: (res, filePath) => {
-      console.log("📄 Serving:", filePath);
+      // Prevent browser from upgrading to HTTPS
+      res.setHeader('Strict-Transport-Security', 'max-age=0');
+      res.setHeader('Content-Security-Policy', "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;");
       
       // Set proper MIME types
       if (filePath.endsWith('.js')) {
-        res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        res.setHeader('Content-Type', 'application/javascript');
       } else if (filePath.endsWith('.css')) {
-        res.setHeader('Content-Type', 'text/css; charset=utf-8');
+        res.setHeader('Content-Type', 'text/css');
       } else if (filePath.endsWith('.svg')) {
         res.setHeader('Content-Type', 'image/svg+xml');
       } else if (filePath.endsWith('.html')) {
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Content-Type', 'text/html');
+      } else if (filePath.endsWith('.ico')) {
+        res.setHeader('Content-Type', 'image/x-icon');
       }
-      
-      // Remove problematic headers for HTTP
-      res.removeHeader('Cross-Origin-Opener-Policy');
-      res.removeHeader('Cross-Origin-Embedder-Policy');
-      res.removeHeader('Origin-Agent-Cluster');
     },
   }));
 
-  // SPA fallback - serve index.html for all non-API routes
+  // SPA fallback
   app.get(/^\/(?!api|health).*/, (req, res) => {
     const indexPath = path.join(frontendPath, "index.html");
     
     if (fs.existsSync(indexPath)) {
       console.log("🏠 Serving index.html for:", req.url);
+      
+      // Send the file with explicit HTTP headers
+      res.setHeader('Strict-Transport-Security', 'max-age=0');
+      res.setHeader('Content-Security-Policy', "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;");
       res.sendFile(indexPath);
     } else {
       console.error("❌ index.html not found at:", indexPath);
@@ -132,9 +114,18 @@ if (fs.existsSync(frontendPath)) {
       });
     }
   });
+
+  // Specific route for favicon
+  app.get('/favicon.svg', (req, res) => {
+    const faviconPath = path.join(frontendPath, 'favicon.svg');
+    if (fs.existsSync(faviconPath)) {
+      res.sendFile(faviconPath);
+    } else {
+      res.status(404).send('Not found');
+    }
+  });
 } else {
   console.error("❌ Frontend build directory not found at:", frontendPath);
-  console.log("Please build the frontend first: cd frontend && npm run build");
 }
 
 /* ================= ERROR HANDLERS ================= */
@@ -145,4 +136,12 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 6004;
 
 app.listen(PORT, '0.0.0.0', () => {
+  console.log("=".repeat(50));
+  console.log(`🚀 Server running on HTTP port ${PORT}`);
+  console.log(`📍 Environment: ${process.env.NODE_ENV}`);
+  console.log(`🌐 Access via HTTP ONLY: http://72.60.233.42:${PORT}`);
+  console.log(`📝 Form: http://72.60.233.42:${PORT}/form`);
+  console.log(`📊 Dashboard: http://72.60.233.42:${PORT}/dashboard`);
+  console.log(`💚 Health: http://72.60.233.42:${PORT}/health`);
+  console.log("=".repeat(50));
 });
