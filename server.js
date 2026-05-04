@@ -15,7 +15,6 @@ connectDB();
 
 const app = express();
 
-/* ================= SECURITY ================= */
 app.use(helmet());
 
 app.use(
@@ -28,43 +27,34 @@ app.use(
   })
 );
 
-/* ================= RATE LIMIT ================= */
 app.use(
   "/api/",
   rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
-    message: "Too many requests, please try again later",
   })
 );
 
-/* ================= BODY PARSER ================= */
-app.use(express.json({ limit: "10kb" }));
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* ================= LOGGING ================= */
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-/* ================= API ROUTES ================= */
 app.use("/api/leads", leadRoutes);
 
 app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    message: "Server is running",
-    time: new Date().toISOString(),
-  });
+  res.json({ status: "ok" });
 });
 
-const frontendPath = path.resolve(__dirname, "./frontend/dist");
+/* ================= FRONTEND ================= */
+const frontendPath = path.join(__dirname, "frontend/dist");
 
-// serve static files
 app.use(express.static(frontendPath));
 
-// SPA fallback
-app.get(/^\/(?!api).*/, (req, res) => {
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api")) return next();
   res.sendFile(path.join(frontendPath, "index.html"));
 });
 app.use(notFound);
@@ -72,7 +62,6 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 6004;
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📦 Environment: ${process.env.NODE_ENV}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
